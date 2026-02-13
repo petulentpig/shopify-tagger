@@ -1,75 +1,102 @@
-const { shopifyApi, LATEST_API_VERSION } = require("@shopify/shopify-api");
 const config = require("../../config");
 
-// Initialize Shopify API client
-const shopify = shopifyApi({
-  apiKey: config.shopify.apiKey,
-  apiSecretKey: config.shopify.apiSecret,
-  scopes: config.shopify.scopes,
-  hostName: (config.shopify.host || "").replace(/https?:\/\//, ""),
-  apiVersion: LATEST_API_VERSION,
-  isEmbeddedApp: false,
-});
+const API_VERSION = "2024-10";
 
 /**
- * Create a REST client for a given shop
+ * Make a Shopify Admin REST API request
  */
-function createRestClient(shop, accessToken) {
-  return new shopify.clients.Rest({
-    session: { shop, accessToken },
-  });
-}
+async function shopifyRequest(method, path, data = null) {
+  const shop = config.shopify.shopDomain;
+  const token = config.shopify.accessToken;
+  const url = `https://${shop}/admin/api/${API_VERSION}/${path}.json`;
 
-/**
- * Create a GraphQL client for a given shop
- */
-function createGraphQLClient(shop, accessToken) {
-  return new shopify.clients.Graphql({
-    session: { shop, accessToken },
-  });
+  const options = {
+    method,
+    headers: {
+      "Content-Type": "application/json",
+      "X-Shopify-Access-Token": token,
+    },
+  };
+
+  if (data) {
+    options.body = JSON.stringify(data);
+  }
+
+  const response = await fetch(url, options);
+
+  if (!response.ok) {
+    const errorBody = await response.text();
+    throw new Error(
+      `Shopify API error (${response.status}): ${errorBody}`
+    );
+  }
+
+  return response.json();
 }
 
 /**
  * Fetch all products from the shop (paginated)
  */
-async function fetchAllProducts(shop, accessToken, limit = 50) {
-  const client = createRestClient(shop, accessToken);
+async function fetchAllProducts(limit = 50) {
+  const shop = config.shopify.shopDomain;
+  const token = config.shopify.accessToken;
   const products = [];
-  let pageInfo;
+  let url = `https://${shop}/admin/api/${API_VERSION}/products.json?limit=${limit}`;
 
-  do {
-    const params = { limit };
-    if (pageInfo?.nextPage) {
-      Object.assign(params, pageInfo.nextPage.query);
+  while (url) {
+    const response = await fetch(url, {
+      headers: {
+        "Content-Type": "application/json",
+        "X-Shopify-Access-Token": token,
+      },
+    });
+
+    if (!response.ok) {
+      const errorBody = await response.text();
+      throw new Error(`Shopify API error (${response.status}): ${errorBody}`);
     }
 
-    const response = await client.get({ path: "products", query: params });
-    products.push(...response.body.products);
-    pageInfo = response.pageInfo;
-  } while (pageInfo?.nextPage);
+    const body = await response.json();
+    products.push(...body.products);
+
+    // Handle pagination via Link header
+    const linkHeader = response.headers.get("link");
+    url = null;
+    if (linkHeader) {
+      const nextMatch = linkHeader.match(/<([^>]+)>;\s*rel="next"/);
+      if (nextMatch) {
+        url = nextMatch[1];
+      }
+    }
+  }
 
   return products;
 }
 
 /**
+ * Fetch a single product by ID
+ */
+async function fetchProduct(productId) {
+  const result = await shopifyRequest("GET", `products/${productId}`);
+  return result.product;
+}
+
+/**
  * Update tags for a single product
  */
-async function updateProductTags(shop, accessToken, productId, tags) {
-  const client = createRestClient(shop, accessToken);
+async function updateProductTags(productId, tags) {
   const tagString = Array.isArray(tags) ? tags.join(", ") : tags;
 
-  const response = await client.put({
-    path: `products/${productId}`,
-    data: { product: { id: productId, tags: tagString } },
+  const result = await shopifyRequest("PUT", `products/${productId}`, {
+    product: { id: productId, tags: tagString },
   });
 
-  return response.body.product;
+  return result.product;
 }
 
 module.exports = {
-  shopify,
-  createRestClient,
-  createGraphQLClient,
+  shopifyRequest,
   fetchAllProducts,
+  fetchProduct,
   updateProductTags,
 };

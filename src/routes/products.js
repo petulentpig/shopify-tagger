@@ -1,11 +1,9 @@
 const express = require("express");
-const { fetchAllProducts, updateProductTags } = require("../services/shopifyClient");
+const { fetchAllProducts, fetchProduct, updateProductTags } = require("../services/shopifyClient");
 const { generateTags, generateTagsBatch } = require("../services/tagger");
 const { notifyBulkTagSummary, notifyTagException } = require("../services/slack");
-const config = require("../../config");
 
 const router = express.Router();
-const { shopDomain, accessToken } = config.shopify;
 
 /**
  * GET /api/products
@@ -13,7 +11,7 @@ const { shopDomain, accessToken } = config.shopify;
  */
 router.get("/", async (req, res) => {
   try {
-    const products = await fetchAllProducts(shopDomain, accessToken);
+    const products = await fetchAllProducts();
     const summary = products.map((p) => ({
       id: p.id,
       title: p.title,
@@ -39,8 +37,7 @@ router.post("/:id/tag", async (req, res) => {
     const { merge = true } = req.body; // merge with existing tags by default
 
     // Fetch the product
-    const products = await fetchAllProducts(shopDomain, accessToken);
-    const product = products.find((p) => String(p.id) === String(productId));
+    const product = await fetchProduct(productId);
 
     if (!product) {
       return res.status(404).json({ error: "Product not found" });
@@ -69,7 +66,7 @@ router.post("/:id/tag", async (req, res) => {
     }
 
     // Apply tags
-    const updated = await updateProductTags(shopDomain, accessToken, productId, finalTags);
+    const updated = await updateProductTags(productId, finalTags);
 
     res.json({
       productId: updated.id,
@@ -93,7 +90,7 @@ router.post("/tag-all", async (req, res) => {
     const { merge = true, dryRun = false } = req.body;
 
     // Fetch all products
-    const products = await fetchAllProducts(shopDomain, accessToken);
+    const products = await fetchAllProducts();
     console.log(`Generating tags for ${products.length} products...`);
 
     // Generate tags for all products
@@ -127,7 +124,7 @@ router.post("/tag-all", async (req, res) => {
       }
 
       if (!dryRun) {
-        await updateProductTags(shopDomain, accessToken, result.productId, finalTags);
+        await updateProductTags(result.productId, finalTags);
       }
 
       results.push({
