@@ -1,14 +1,15 @@
-const OpenAI = require("openai");
+const Anthropic = require("@anthropic-ai/sdk");
 const config = require("../../config");
 
-const openai = new OpenAI({ apiKey: config.openai.apiKey });
+const anthropic = new Anthropic({ apiKey: config.anthropic.apiKey });
 
 const SYSTEM_PROMPT = `You are a product tagging assistant for a Shopify store.
 Given a product's title, description, vendor, product type, and other attributes,
 generate a list of relevant tags that will help with search, filtering, and SEO.
 
 Rules:
-- Return ONLY a JSON array of lowercase tag strings
+- Return ONLY a JSON object like {"tags": ["tag1", "tag2", ...]}
+- All tags should be lowercase strings
 - Include tags for: category, material, color, style, season, use-case, audience
 - Keep tags concise (1-3 words each)
 - Generate 5-15 tags per product
@@ -32,20 +33,19 @@ async function generateTags(product) {
     })),
   };
 
-  const response = await openai.chat.completions.create({
-    model: "gpt-4o-mini",
+  const response = await anthropic.messages.create({
+    model: "claude-sonnet-4-5-20250929",
+    max_tokens: 1024,
+    system: SYSTEM_PROMPT,
     messages: [
-      { role: "system", content: SYSTEM_PROMPT },
       {
         role: "user",
         content: `Generate tags for this product:\n${JSON.stringify(productInfo, null, 2)}`,
       },
     ],
-    temperature: 0.3,
-    response_format: { type: "json_object" },
   });
 
-  const content = response.choices[0].message.content;
+  const content = response.content[0].text;
   const parsed = JSON.parse(content);
 
   // Handle both { tags: [...] } and direct array responses

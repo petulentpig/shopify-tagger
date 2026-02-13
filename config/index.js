@@ -9,8 +9,8 @@ module.exports = {
     shopDomain: process.env.SHOP_DOMAIN,
     accessToken: process.env.SHOPIFY_ACCESS_TOKEN,
   },
-  openai: {
-    apiKey: process.env.OPENAI_API_KEY,
+  anthropic: {
+    apiKey: process.env.ANTHROPIC_API_KEY,
   },
   server: {
     port: parseInt(process.env.PORT, 10) || 3000,
