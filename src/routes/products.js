@@ -1,6 +1,7 @@
 const express = require("express");
 const { fetchAllProducts, updateProductTags } = require("../services/shopifyClient");
 const { generateTags, generateTagsBatch } = require("../services/tagger");
+const { notifyBulkTagSummary, notifyTagException } = require("../services/slack");
 const config = require("../../config");
 
 const router = express.Router();
@@ -46,7 +47,17 @@ router.post("/:id/tag", async (req, res) => {
     }
 
     // Generate AI tags
-    const newTags = await generateTags(product);
+    let newTags;
+    try {
+      newTags = await generateTags(product);
+    } catch (tagError) {
+      await notifyTagException({
+        productId,
+        title: product.title,
+        error: tagError.message,
+      }).catch(() => {});
+      throw tagError;
+    }
 
     // Merge or replace tags
     let finalTags;
@@ -88,6 +99,17 @@ router.post("/tag-all", async (req, res) => {
     // Generate tags for all products
     const tagResults = await generateTagsBatch(products);
 
+    // Notify Slack about individual failures
+    for (const result of tagResults) {
+      if (!result.success) {
+        await notifyTagException({
+          productId: result.productId,
+          title: result.title,
+          error: result.error,
+        }).catch(() => {});
+      }
+    }
+
     // Apply tags (unless dry run)
     const results = [];
     for (const result of tagResults) {
@@ -118,13 +140,18 @@ router.post("/tag-all", async (req, res) => {
       });
     }
 
-    res.json({
+    const summary = {
       total: products.length,
       tagged: results.filter((r) => r.applied).length,
       failed: results.filter((r) => !r.success).length,
       dryRun,
       results,
-    });
+    };
+
+    // Send bulk summary to Slack
+    await notifyBulkTagSummary(summary).catch(() => {});
+
+    res.json(summary);
   } catch (error) {
     console.error("Error in bulk tagging:", error.message);
     res.status(500).json({ error: "Failed to tag products" });
